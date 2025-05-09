@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Voice Assistant QnA</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+    }
+
+    #chat-window {
+      max-height: 400px;
+      overflow-y: auto;
+      border: 1px solid #ccc;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .message {
+      padding: 10px;
+      border-radius: 10px;
+      max-width: 70%;
+    }
+
+    .user {
+      align-self: flex-end;
+      background-color: #e1f5fe;
+      text-align: right;
+    }
+
+    .bot {
+      align-self: flex-start;
+      background-color: #fff8e1;
+      text-align: left;
+    }
+
+    #status {
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <h2>🎙️ Deepgram Voice Assistant (QnA)</h2>
+  <button onclick="start()">Start</button>
+  <button onclick="stop()">Stop</button>
+  <p id="status">Status: Idle</p>
+
+  <div id="chat-window"></div>
+
+  <script>
+    let ws, audioCtx, stream, workletNode;
+
+    async function start() {
+      ws = new WebSocket("ws://localhost:3000");
+      ws.binaryType = "arraybuffer";
+
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      await audioCtx.audioWorklet.addModule('processor.js');
+
+      const micSource = audioCtx.createMediaStreamSource(stream);
+      workletNode = new AudioWorkletNode(audioCtx, 'pcm-processor');
+
+      micSource.connect(workletNode);
+      workletNode.connect(audioCtx.destination);
+
+      workletNode.port.onmessage = (e) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(e.data);
+        }
+      };
+
+      ws.onmessage = (e) => {
+        if (typeof e.data === 'string') {
+          const { transcript, answer } = JSON.parse(e.data);
+          appendMessage('user', transcript);
+          appendMessage('bot', answer);
+        } else {
+          const blob = new Blob([e.data], { type: 'audio/mpeg' });
+          const audio = new Audio(URL.createObjectURL(blob));
+          audio.play();
+        }
+      };
+
+      ws.onopen = () => document.getElementById('status').textContent = '🎧 Listening...';
+      ws.onclose = () => document.getElementById('status').textContent = '❌ Disconnected';
+    }
+
+    function stop() {
+      if (workletNode) workletNode.disconnect();
+      if (audioCtx) audioCtx.close();
+      if (stream) stream.getTracks().forEach(track => track.stop());
+      if (ws) ws.close();
+      document.getElementById('status').textContent = '🛑 Stopped';
+    }
+
+    function appendMessage(role, text) {
+      const chatWindow = document.getElementById("chat-window");
+      const bubble = document.createElement("div");
+      bubble.className = `message ${role}`;
+      bubble.textContent = text;
+      chatWindow.appendChild(bubble);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+  </script>
+</body>
+</html>
