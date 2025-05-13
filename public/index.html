@@ -186,7 +186,7 @@
           const { transcript, answer } = JSON.parse(e.data);
           
           if (transcript) appendMessage('user', transcript);
-          if (answer) appendMessage('bot', answer);  // ✅ prevents empty lines
+          if (answer) typeMessage('bot', answer);  // ✅ prevents empty lines
         }
         else {
           const blob = new Blob([e.data], { type: 'audio/mpeg' });
@@ -224,6 +224,26 @@
       bubble.textContent = text;
       chatWindow.appendChild(bubble);
       chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    function typeMessage(role, text) {
+      const chatWindow = document.getElementById("chat-window");
+      const bubble = document.createElement("div");
+      bubble.className = `message ${role}`;
+      chatWindow.appendChild(bubble);
+
+      let i = 0;
+
+      function typeChar() {
+        if (i < text.length) {
+          bubble.textContent += text.charAt(i);
+          chatWindow.scrollTop = chatWindow.scrollHeight;  // 👈 this line moves scroll during typing
+          i++;
+          setTimeout(typeChar, 25); // Adjust typing speed
+        }
+      }
+
+      typeChar();
     }
   </script>
 </body>
