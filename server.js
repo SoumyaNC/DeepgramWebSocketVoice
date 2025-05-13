@@ -6,7 +6,7 @@ const fetch = require('node-fetch');
 const qna = require('./qna'); // Your QnA map
 
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
-const DG_URL = 'wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=16000&utterances=true&punctuate=true&model=base&smart_format=true';
+const DG_URL = 'wss://api.deepgram.com/v1/listen?encoding=linear16&sample_rate=16000&utterances=true&punctuate=true&model=base&smart_format=true&vad_events=true&endpointing=1000';
 
 const app = express();
 const server = http.createServer(app);
@@ -137,7 +137,7 @@ wss.on('connection', (client) => {
   dgSocket.on('message', async (msg) => {
     const data = JSON.parse(msg.toString());
 
-    if (data.channel?.alternatives?.[0]?.transcript && data.speech_final) {
+    if (data.channel?.alternatives?.[0]?.transcript && data.is_final) {
       const userText = data.channel.alternatives[0].transcript.toLowerCase().trim();
       console.log('🧠 Transcript:', userText);
       const transcript=userText
