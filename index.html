@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Voice Assistant QnA</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+  body {
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    font-family: sans-serif;
+    background: linear-gradient(to right, #4facfe, #00f2fe);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .main-layout {
+    width: 90%;
+    max-width: 1000px;
+    height: 80%;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.3);
+    display: flex;
+    overflow: hidden;
+  }
+
+  .left-panel {
+    width: 30%;
+    background: #f2f2f2;
+    padding: 20px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    position: relative; 
+  }
+
+  .right-panel {
+    width: 70%;
+    padding: 20px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    border-left: 1px solid #ccc;
+  }
+
+  .call-animation {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    border: 6px solid #4caf50;
+    animation: pulse 1s infinite;
+    margin-bottom: 20px;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(1); opacity: 0.8; }
+    50% { transform: scale(1.1); opacity: 0.4; }
+    100% { transform: scale(1); opacity: 0.8; }
+  }
+
+  .controls button {
+    width: 100%;
+    margin-bottom: 10px;
+    padding: 12px;
+    font-size: 16px;
+    border: none;
+    border-radius: 5px;
+    color: white;
+    cursor: pointer;
+  }
+
+  .call { background: green; }
+  .disconnect { background: red; }
+
+  #chat-window {
+    flex-grow: 1;
+    overflow-y: auto;
+    background: #f9f9f9;
+    padding: 10px;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border: 1px solid #ccc;
+  }
+
+  .message {
+    padding: 10px;
+    border-radius: 10px;
+    max-width: 70%;
+  }
+
+  .user { align-self: flex-end; background: #e1f5fe; }
+  .bot  { align-self: flex-start; background: #fff8e1; }
+
+  #status {
+    margin-top: 10px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  #volume-container {
+    width: 100%;
+    background: #ddd;
+    height: 10px;
+    border-radius: 5px;
+    overflow: hidden;
+    margin-top: 10px;
+  }
+
+  #volume-bar {
+    height: 100%;
+    width: 0%;
+    background: #4caf50;
+    transition: width 0.1s ease-out;
+  }
+  body.dark {
+  background: #111;
+}
+
+body.dark .main-layout {
+  background: #1e1e1e;
+  color: #eee;
+}
+
+body.dark .left-panel {
+  background: #222;
+}
+
+body.dark .right-panel {
+  border-left: 1px solid #444;
+}
+
+body.dark #chat-window {
+  background: #2b2b2b;
+  border-color: #444;
+}
+
+body.dark .message.user {
+  background: #006064;
+  color: #fff;
+}
+
+body.dark .message.bot {
+  background: #827717;
+  color: #fff;
+}
+
+body.dark .call-animation {
+  border-color: #4caf50;
+}
+.fixed-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+}
+
+
+
+</style>
+</head>
+<body>
+ <div class="main-layout">
+  <button id="themeToggle" style="
+  position: absolute; top: 15px; right: 20px;
+  padding: 6px 12px; border: none;
+  border-radius: 6px; background: #222; color: white;
+  cursor: pointer; z-index: 999;">🌙 Dark</button>
+    <div class="left-panel">
+      <div class="call-animation" id="callPulse" style="display:none;"></div>
+      <div class="controls fixed-center">
+        <button id="callBtn" class="call" onclick="start()"><i class="fas fa-phone"></i> Call</button>
+        <button id="disconnectBtn" class="disconnect" onclick="stop()" style="display:none;"><i class="fas fa-phone-slash"></i> Disconnect</button>
+      </div>
+      <div id="volume-container" style="display: none;"><div id="volume-bar"></div></div>
+      <p id="status">Status: Idle</p>
+    </div>
+
+    <div class="right-panel">
+      <h2>🎤 Voice Chat Transcription</h2>
+      <div id="waveformBar" style="
+        height: 20px; width: 100%;
+        background: linear-gradient(to right, #4caf50, #8bc34a);
+        transform-origin: left center;
+        transform: scaleX(0);
+        transition: transform 0.05s ease-out;
+        margin-bottom: 10px;
+        border-radius: 6px;
+      "></div>      
+      <div id="chat-window"></div>
+    </div>
+  </div>
+
+  <script>
+    let ws, audioCtx, stream, workletNode;
+    let statusInterval;
+
+    document.getElementById("themeToggle").onclick = () => {
+      document.body.classList.toggle("dark");
+      const label = document.body.classList.contains("dark") ? "☀️ Light" : "🌙 Dark";
+      document.getElementById("themeToggle").textContent = label;
+    };
+
+
+    function setStatus(text, animate = false) {
+      const status = document.getElementById("status");
+      status.textContent = text;
+
+      if (statusInterval) clearInterval(statusInterval);
+
+      if (animate) {
+        let dots = "";
+        statusInterval = setInterval(() => {
+          dots = dots.length < 3 ? dots + "." : "";
+          status.textContent = text + dots;
+        }, 500);
+      }
+    }
+
+    async function start() {
+      document.getElementById("callPulse").style.display = "block";
+      document.getElementById("callBtn").style.display = "none";
+      document.getElementById("disconnectBtn").style.display = "inline-block";
+      setStatus("Connecting", true);
+
+      ws = new WebSocket("ws://localhost:3000");
+      ws.binaryType = "arraybuffer";
+      ws.onopen = () => {
+       
+        ws.send(JSON.stringify({ voice: "aura-2-andromeda-en", welcome: true }));
+        setStatus("🎧 Connected");
+      };
+
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      await audioCtx.audioWorklet.addModule('processor.js');
+
+      const micSource = audioCtx.createMediaStreamSource(stream);
+      workletNode = new AudioWorkletNode(audioCtx, 'pcm-processor');
+
+      micSource.connect(workletNode);
+      workletNode.connect(audioCtx.destination);
+
+      workletNode.port.onmessage = (e) => {
+        if (e.data.volume !== undefined) {
+          const vol = Math.min(1, e.data.volume); // cap to 1
+          const percent = Math.floor(vol * 100);
+          //document.getElementById("volume-bar").style.width = percent + "%";
+          const level = Math.min(1, e.data.volume * 2);
+          document.getElementById("volume-bar").style.width = (level * 100) + "%";
+          document.getElementById("waveformBar").style.transform = `scaleX(${level})`;
+        }
+
+        if (e.data.audio && ws.readyState === WebSocket.OPEN) {
+          ws.send(e.data.audio);
+        }
+      };
+
+      ws.onmessage = (e) => {
+        
+        console.log(e.data)
+        if (typeof e.data === 'string') {
+          const { transcript, answer } = JSON.parse(e.data);
+          
+          if (transcript) appendMessage('user', transcript);
+          if (answer) typeMessage('bot', answer);  // ✅ prevents empty lines
+        }
+        else {
+          const blob = new Blob([e.data], { type: 'audio/mpeg' });
+          const audio = new Audio(URL.createObjectURL(blob));
+          audio.play();
+        }
+      };
+
+      
+
+      ws.onclose = () => {
+        setStatus("❌ Disconnected");
+        toggleButtons(false);
+      };
+    }
+
+    function stop() {
+      document.getElementById("callPulse").style.display = "none";
+      if (workletNode) workletNode.disconnect();
+      if (audioCtx) audioCtx.close();
+      if (stream) stream.getTracks().forEach(track => track.stop());
+      if (ws) ws.close();
+      setStatus("❌ Disconnected");
+      toggleButtons(false);
+    }
+
+    function toggleButtons(isCalling) {
+      document.getElementById("callBtn").style.display = isCalling ? "none" : "inline-block";
+      document.getElementById("disconnectBtn").style.display = isCalling ? "inline-block" : "none";
+    }
+
+    function appendMessage(role, text) {
+      const chatWindow = document.getElementById("chat-window");
+      const bubble = document.createElement("div");
+      bubble.className = `message ${role}`;
+      bubble.textContent = text;
+      chatWindow.appendChild(bubble);
+      chatWindow.scrollTop = chatWindow.scrollHeight;
+    }
+
+    function typeMessage(role, text) {
+      const chatWindow = document.getElementById("chat-window");
+      const bubble = document.createElement("div");
+      bubble.className = `message ${role}`;
+      chatWindow.appendChild(bubble);
+
+      let i = 0;
+
+      function typeChar() {
+        if (i < text.length) {
+          bubble.textContent += text.charAt(i);
+          chatWindow.scrollTop = chatWindow.scrollHeight;  // 👈 this line moves scroll during typing
+          i++;
+          setTimeout(typeChar, 60); // Adjust typing speed
+        }
+      }
+
+      typeChar();
+    }
+  </script>
+</body>
+</html>
