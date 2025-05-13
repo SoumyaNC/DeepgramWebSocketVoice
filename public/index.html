@@ -2,20 +2,51 @@
 <html>
 <head>
   <title>Voice Assistant QnA</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <style>
     body {
       font-family: sans-serif;
-      margin: 20px;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background: linear-gradient(to right, #4facfe, #00f2fe);
+    }
+
+    .container {
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+      width: 400px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    h2 {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+
+    #controls {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      margin-bottom: 10px;
     }
 
     #chat-window {
-      max-height: 400px;
+      max-height: 300px;
       overflow-y: auto;
       border: 1px solid #ccc;
       padding: 10px;
       display: flex;
       flex-direction: column;
       gap: 10px;
+      background: #f9f9f9;
+      border-radius: 5px;
     }
 
     .message {
@@ -36,25 +67,95 @@
       text-align: left;
     }
 
+    #volume-container {
+      margin-top: 10px;
+      height: 10px;
+      width: 100%;
+      background-color: #ddd;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    #volume-bar {
+      height: 100%;
+      width: 0%;
+      background-color: #4caf50;
+      transition: width 0.1s ease-out;
+    }
+
     #status {
-      margin: 10px 0;
+      margin-top: 10px;
+      text-align: center;
+      font-weight: bold;
+    }
+
+    button {
+      border: none;
+      padding: 10px 20px;
+      font-size: 16px;
+      border-radius: 5px;
+      cursor: pointer;
+      color: white;
+    }
+
+    button.call {
+      background-color: green;
+    }
+
+    button.disconnect {
+      background-color: red;
     }
   </style>
 </head>
 <body>
-  <h2>🎙️ Deepgram Voice Assistant (QnA)</h2>
-  <button onclick="start()">Start</button>
-  <button onclick="stop()">Stop</button>
-  <p id="status">Status: Idle</p>
+  <div class="container">
+    <h2>🎤 Voice Assistant</h2>
 
-  <div id="chat-window"></div>
+    <div id="controls">
+      <button id="callBtn" class="call" onclick="start()" title="Call">
+        <i class="fas fa-phone"></i> Call
+      </button>
+      <button id="disconnectBtn" class="disconnect" onclick="stop()" title="Disconnect" style="display:none;">
+        <i class="fas fa-phone-slash"></i> Disconnect
+      </button>
+    </div>
+
+    <div id="chat-window"></div>
+    <div id="volume-container"><div id="volume-bar"></div></div>
+    <p id="status">Status: Idle</p>
+  </div>
 
   <script>
     let ws, audioCtx, stream, workletNode;
+    let statusInterval;
+
+    function setStatus(text, animate = false) {
+      const status = document.getElementById("status");
+      status.textContent = text;
+
+      if (statusInterval) clearInterval(statusInterval);
+
+      if (animate) {
+        let dots = "";
+        statusInterval = setInterval(() => {
+          dots = dots.length < 3 ? dots + "." : "";
+          status.textContent = text + dots;
+        }, 500);
+      }
+    }
 
     async function start() {
+      document.getElementById("callBtn").style.display = "none";
+      document.getElementById("disconnectBtn").style.display = "inline-block";
+      setStatus("Connecting", true);
+
       ws = new WebSocket("ws://localhost:3000");
       ws.binaryType = "arraybuffer";
+      ws.onopen = () => {
+       
+        ws.send(JSON.stringify({ voice: "aura-2-andromeda-en", welcome: true }));
+        setStatus("🎧 Connected");
+      };
 
       audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -67,25 +168,39 @@
       workletNode.connect(audioCtx.destination);
 
       workletNode.port.onmessage = (e) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(e.data);
+        if (e.data.volume !== undefined) {
+          const vol = Math.min(1, e.data.volume); // cap to 1
+          const percent = Math.floor(vol * 100);
+          document.getElementById("volume-bar").style.width = percent + "%";
+        }
+
+        if (e.data.audio && ws.readyState === WebSocket.OPEN) {
+          ws.send(e.data.audio);
         }
       };
 
       ws.onmessage = (e) => {
+        
+        console.log(e.data)
         if (typeof e.data === 'string') {
           const { transcript, answer } = JSON.parse(e.data);
-          appendMessage('user', transcript);
-          appendMessage('bot', answer);
-        } else {
+          
+          if (transcript) appendMessage('user', transcript);
+          if (answer) appendMessage('bot', answer);  // ✅ prevents empty lines
+        }
+        else {
           const blob = new Blob([e.data], { type: 'audio/mpeg' });
           const audio = new Audio(URL.createObjectURL(blob));
           audio.play();
         }
       };
 
-      ws.onopen = () => document.getElementById('status').textContent = '🎧 Listening...';
-      ws.onclose = () => document.getElementById('status').textContent = '❌ Disconnected';
+      
+
+      ws.onclose = () => {
+        setStatus("❌ Disconnected");
+        toggleButtons(false);
+      };
     }
 
     function stop() {
@@ -93,7 +208,13 @@
       if (audioCtx) audioCtx.close();
       if (stream) stream.getTracks().forEach(track => track.stop());
       if (ws) ws.close();
-      document.getElementById('status').textContent = '🛑 Stopped';
+      setStatus("❌ Disconnected");
+      toggleButtons(false);
+    }
+
+    function toggleButtons(isCalling) {
+      document.getElementById("callBtn").style.display = isCalling ? "none" : "inline-block";
+      document.getElementById("disconnectBtn").style.display = isCalling ? "inline-block" : "none";
     }
 
     function appendMessage(role, text) {
